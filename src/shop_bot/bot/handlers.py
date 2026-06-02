@@ -217,6 +217,64 @@ async def issue_24h_vpn_access(message: types.Message, host_name: str | None = N
         logger.error(f"Ошибка активации 24h VPN для пользователя {user_id} на хосте {selected_host}: {e}", exc_info=True)
         await message.edit_text("❌ Произошла ошибка при активации VPN.")
 
+async def show_main_menu(message: types.Message, edit_message: bool = False):
+    user_id = message.chat.id
+    user_db_data = get_user(user_id)
+    user_keys = get_user_keys(user_id)
+    
+    trial_available = not (user_db_data and user_db_data.get('trial_used'))
+    is_admin_flag = is_admin(user_id)
+
+    custom_main_text = get_setting("main_menu_text")
+    text = (custom_main_text or "🏠 <b>Главное меню</b>\n\nВыберите действие:")
+    keyboard = keyboards.create_main_menu_keyboard(user_keys, trial_available, is_admin_flag)
+    
+    if edit_message:
+        try:
+            await message.edit_text(text, reply_markup=keyboard)
+        except TelegramBadRequest:
+            pass
+    else:
+        await message.answer(text, reply_markup=keyboard)
+
+async def process_successful_onboarding(callback: types.CallbackQuery, state: FSMContext):
+    """Завершает онбординг: ставит флаг согласия и открывает главное меню."""
+    user_id = callback.from_user.id
+    try:
+        set_terms_agreed(user_id)
+    except Exception as e:
+        logger.error(f"Не удалось установить согласие с условиями для пользователя {user_id}: {e}")
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    try:
+        await show_main_menu(callback.message, edit_message=True)
+    except Exception:
+        try:
+            await callback.message.answer("✅ Требования выполнены. Открываю меню...")
+        except Exception:
+            pass
+    try:
+        await state.clear()
+    except Exception:
+        pass
+
+def registration_required(f):
+    @wraps(f)
+    async def decorated_function(event: types.Update, *args, **kwargs):
+        user_id = event.from_user.id
+        user_data = get_user(user_id)
+        if user_data:
+            return await f(event, *args, **kwargs)
+        else:
+            message_text = "Пожалуйста, для начала работы со мной, отправьте команду /start"
+            if isinstance(event, types.CallbackQuery):
+                await event.answer(message_text, show_alert=True)
+            else:
+                await event.answer(message_text)
+    return decorated_function
+
 def get_user_router() -> Router:
     user_router = Router()
 
