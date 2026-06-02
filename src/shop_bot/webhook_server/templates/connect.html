@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if error_title %}24darkvpn - ошибка{% else %}24darkvpn - подключение{% endif %}</title>
+  <style>
+    :root {
+      --bg-1: #06111a;
+      --bg-2: #0b2330;
+      --surface: rgba(8, 20, 31, 0.88);
+      --surface-soft: rgba(255, 255, 255, 0.05);
+      --line: rgba(255, 255, 255, 0.10);
+      --text: #eff8fc;
+      --muted: #a9bac5;
+      --accent: #35d2bb;
+      --accent-2: #1db5f0;
+      --ok: #8bf0cc;
+      --warn: #ffd38a;
+      --danger: #ff9797;
+      --shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      color-scheme: dark;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Manrope", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% 10%, rgba(53, 210, 187, 0.18), transparent 28%),
+        radial-gradient(circle at 85% 0%, rgba(29, 181, 240, 0.14), transparent 28%),
+        linear-gradient(180deg, var(--bg-1), var(--bg-2));
+      display: flex;
+      justify-content: center;
+      padding: 18px;
+    }
+
+    .shell {
+      width: min(760px, 100%);
+      display: grid;
+      align-content: center;
+    }
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      border-radius: 30px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      backdrop-filter: blur(20px);
+      box-shadow: var(--shadow);
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: -40px auto auto -40px;
+      width: 180px;
+      height: 180px;
+      background: radial-gradient(circle, rgba(53, 210, 187, 0.16), transparent 72%);
+      pointer-events: none;
+    }
+
+    .inner {
+      position: relative;
+      padding: 24px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+    }
+
+    .meta-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--muted);
+      font-size: 13px;
+      text-align: right;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 5vw, 44px);
+      line-height: 1.04;
+      letter-spacing: -0.03em;
+    }
+
+    .lead {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    .switcher-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .switcher {
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      min-height: 58px;
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    }
+
+    .switcher strong {
+      display: block;
+      font-size: 17px;
+      margin-bottom: 4px;
+    }
+
+    .switcher span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .switcher.active,
+    .switcher:hover {
+      transform: translateY(-1px);
+      border-color: rgba(53, 210, 187, 0.50);
+      background: rgba(13, 38, 55, 0.96);
+    }
+
+    .apps-title {
+      margin: 22px 0 10px;
+      font-size: 14px;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .app-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+    }
+
+    .app-button {
+      appearance: none;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(12, 31, 46, 0.96);
+      color: var(--text);
+      padding: 16px;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+      display: grid;
+      gap: 12px;
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .app-button:hover,
+    .app-button.active {
+      transform: translateY(-2px);
+      border-color: rgba(53, 210, 187, 0.48);
+      background: rgba(14, 41, 60, 1);
+      box-shadow: 0 16px 34px rgba(0, 0, 0, 0.18);
+    }
+
+    .app-button:disabled {
+      opacity: 0.46;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .app-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .app-mark {
+      width: 46px;
+      height: 46px;
+      flex: 0 0 46px;
+      border-radius: 15px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: linear-gradient(135deg, rgba(53, 210, 187, 0.24), rgba(29, 181, 240, 0.24));
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+
+    .app-copy strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .app-copy span,
+    .app-help,
+    .status,
+    .manual p,
+    .empty {
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 28px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .badge.direct {
+      background: rgba(139, 240, 204, 0.94);
+      color: #05202a;
+    }
+
+    .badge.system {
+      background: rgba(255, 211, 138, 0.94);
+      color: #2f1d06;
+    }
+
+    .badge.clipboard {
+      background: rgba(255, 255, 255, 0.09);
+      color: var(--text);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .status {
+      margin-top: 14px;
+      min-height: 58px;
+      padding: 15px 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .status.ok {
+      color: var(--ok);
+      background: rgba(139, 240, 204, 0.08);
+      border-color: rgba(139, 240, 204, 0.22);
+    }
+
+    .status.warn {
+      color: var(--warn);
+      background: rgba(255, 211, 138, 0.08);
+      border-color: rgba(255, 211, 138, 0.22);
+    }
+
+    .status.danger {
+      color: var(--danger);
+      background: rgba(255, 151, 151, 0.08);
+      border-color: rgba(255, 151, 151, 0.22);
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .action {
+      appearance: none;
+      border: 0;
+      border-radius: 16px;
+      min-height: 52px;
+      padding: 14px 16px;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      transition: transform 0.18s ease, opacity 0.18s ease, background 0.18s ease;
+    }
+
+    .action:hover { transform: translateY(-1px); }
+
+    .action.primary {
+      color: #04131d;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    }
+
+    .action.secondary {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--line);
+    }
+
+    .action[disabled] {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .manual {
+      display: none;
+      margin-top: 12px;
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .manual.visible {
+      display: block;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 118px;
+      resize: vertical;
+      margin-top: 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(4, 11, 18, 0.72);
+      color: var(--text);
+      padding: 14px;
+      font: 500 13px/1.6 "IBM Plex Mono", "SFMono-Regular", monospace;
+    }
+
+    .empty {
+      padding: 20px 4px 8px;
+      text-align: center;
+    }
+
+    .error {
+      text-align: center;
+      padding: 42px 18px;
+    }
+
+    .error h1 {
+      font-size: clamp(28px, 4vw, 40px);
+      margin-bottom: 10px;
+    }
+
+    @media (max-width: 640px) {
+      body { padding: 12px; }
+      .inner { padding: 18px; }
+      .topbar { flex-direction: column; align-items: stretch; }
+      .actions,
+      .switcher-row,
+      .app-grid { grid-template-columns: 1fr; }
+      h1 { font-size: 34px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="card">
+      <div class="inner">
+        {% if error_title %}
+          <div class="error">
+            <div class="brand">24darkvpn</div>
+            <h1>{{ error_title }}</h1>
+            <p class="lead">{{ error_text }}</p>
+          </div>
+        {% else %}
+          <div class="topbar">
+            <div class="brand">24darkvpn</div>
+            <div class="meta-pill">{% if expiry_date %}Доступ до {{ expiry_date.strftime('%d.%m %H:%M') }}{% else %}Ключ активен{% endif %}</div>
+          </div>
+
+          <h1 id="pageTitle">Выберите свое устройство</h1>
+          <p class="lead" id="pageLead">Сначала выберите устройство, затем приложение. После этого мы попробуем открыть его автоматически.</p>
+
+          <div class="switcher-row" id="platformSwitcher">
+            <button class="switcher" id="platform-ios" type="button" onclick="choosePlatform('ios')">
+              <strong>iPhone / iOS</strong>
+              <span>Happ, V2RayTun</span>
+            </button>
+            <button class="switcher" id="platform-android" type="button" onclick="choosePlatform('android')">
+              <strong>Android</strong>
+              <span>Happ, V2RayTun</span>
+            </button>
+            <button class="switcher" id="platform-windows" type="button" onclick="choosePlatform('windows')">
+              <strong>Windows</strong>
+              <span>Happ, v2rayN</span>
+            </button>
+            <button class="switcher" id="platform-macos" type="button" onclick="choosePlatform('macos')">
+              <strong>Mac</strong>
+              <span>Happ, V2RayTun</span>
+            </button>
+          </div>
+
+          <div class="apps-title" id="appsTitle">Выберите приложение</div>
+          <div class="app-grid" id="appGrid"></div>
+
+          <div class="status" id="statusBox">Сначала выберите свое устройство, затем приложение для подключения.</div>
+
+          <div class="actions">
+            <button class="action primary" id="retryButton" type="button" onclick="openSelectedApp()" {% if not is_active %}disabled{% endif %}>ОТКРЫТЬ ПРИЛОЖЕНИЕ</button>
+            <button class="action secondary" type="button" onclick="copyConfig()" {% if not connection_string %}disabled{% endif %}>СКОПИРОВАТЬ ССЫЛКУ</button>
+            <button class="action secondary" id="installButton" type="button" onclick="openStore()" hidden>УСТАНОВИТЬ ПРИЛОЖЕНИЕ</button>
+          </div>
+
+          <div class="manual" id="manualBox">
+            <p>Если приложение не открылось само, откройте его вручную и вставьте эту ссылку:</p>
+            <textarea id="configLink" readonly>{{ connection_string }}</textarea>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if not error_title %}
+    <script>
+      const keyId = {{ key_id|tojson }};
+      const connectionString = {{ (connection_string or '')|tojson }};
+      const isActive = {{ 'true' if is_active else 'false' }};
+      const happLink = {{ (happ_link or '')|tojson }};
+      const initialPlatform = {{ (platform or '')|tojson }};
+      const initialApp = {{ (app or '')|tojson }};
+      let selectedPlatform = "";
+      let selectedAppId = "";
+      let statusTimer = null;
+      let storeTimer = null;
+      let didLeavePageSinceLaunch = false;
+
+      const appsByPlatform = {
+        ios: [
+          { id: "v2raytun", name: "🚀 V2RayTun", mark: "🚀", badge: "deeplink", tone: "direct", strategy: "v2raytun-import", help: "Официальный import-link.", storeUrl: "https://apps.apple.com/us/app/v2raytun/id6476628951?platform=iphone" },
+          { id: "happ", name: "💙 Happ", mark: "💙", badge: "deeplink", tone: "direct", strategy: "happ-encrypted", help: "Официальная зашифрованная Happ-ссылка.", storeUrl: "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215" },
+        ],
+        android: [
+          { id: "v2raytun", name: "🚀 V2RayTun", mark: "🚀", badge: "deeplink", tone: "direct", strategy: "v2raytun-import", help: "Официальный import-link.", storeUrl: "https://play.google.com/store/apps/details?id=com.v2raytun.android" },
+          { id: "happ", name: "💙 Happ", mark: "💙", badge: "deeplink", tone: "direct", strategy: "happ-encrypted", help: "Официальная зашифрованная Happ-ссылка.", storeUrl: "https://play.google.com/store/apps/details?id=com.happproxy" },
+        ],
+        windows: [
+          { id: "happ", name: "💙 Happ", mark: "💙", badge: "deeplink", tone: "direct", strategy: "happ-encrypted", help: "Официальная зашифрованная Happ-ссылка.", storeUrl: "https://www.happ.su/main" },
+          { id: "v2rayn", name: "⚡ v2rayN", mark: "⚡", badge: "desktop", tone: "direct", strategy: "system-link", help: "Пробуем открыть приложение, иначе ведем на официальный release.", storeUrl: "https://github.com/2dust/v2rayN/releases" },
+        ],
+        macos: [
+          { id: "happ", name: "💙 Happ", mark: "💙", badge: "deeplink", tone: "direct", strategy: "happ-encrypted", help: "Официальная зашифрованная Happ-ссылка.", storeUrl: "https://www.happ.su/main" },
+          { id: "v2raytun", name: "🚀 V2RayTun", mark: "🚀", badge: "deeplink", tone: "direct", strategy: "v2raytun-import", help: "Официальный import-link.", storeUrl: "https://apps.apple.com/us/app/v2raytun/id6476628951?platform=iphone" },
+        ],
+      };
+
+      function setStatus(message, tone = "") {
+        const box = document.getElementById("statusBox");
+        box.className = "status" + (tone ? " " + tone : "");
+        box.textContent = message;
+      }
+
+      function markPageHidden() {
+        didLeavePageSinceLaunch = true;
+      }
+
+      function currentApps() {
+        return appsByPlatform[selectedPlatform] || [];
+      }
+
+      function currentApp() {
+        return currentApps().find((item) => item.id === selectedAppId) || null;
+      }
+
+      function showManual() {
+        document.getElementById("manualBox").classList.add("visible");
+      }
+
+      function configureInstallButton(app, visible = false) {
+        const installButton = document.getElementById("installButton");
+        if (!installButton) {
+          return;
+        }
+        if (app && app.storeUrl) {
+          installButton.textContent = `УСТАНОВИТЬ ${app.name.toUpperCase()}`;
+          installButton.hidden = !visible;
+        } else {
+          installButton.textContent = "УСТАНОВИТЬ ПРИЛОЖЕНИЕ";
+          installButton.hidden = true;
+        }
+      }
+
+      function openStore() {
+        const app = currentApp();
+        if (!app || !app.storeUrl) {
+          setStatus("Не удалось определить магазин приложения. Вернитесь в Telegram и откройте нужную кнопку еще раз.", "warn");
+          return;
+        }
+        window.location.href = app.storeUrl;
+      }
+
+      function triggerLaunchUrl(url) {
+        if (!url) {
+          return;
+        }
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.style.display = "none";
+        document.body.appendChild(anchor);
+        try {
+          anchor.click();
+        } catch (error) {
+        }
+
+        const frame = document.createElement("iframe");
+        frame.style.display = "none";
+        frame.src = url;
+        document.body.appendChild(frame);
+
+        setTimeout(() => {
+          window.location.href = url;
+        }, 80);
+
+        setTimeout(() => {
+          frame.remove();
+          anchor.remove();
+        }, 2000);
+      }
+
+      function setAutoRedirectMode(appName) {
+        const pageTitle = document.getElementById("pageTitle");
+        const pageLead = document.getElementById("pageLead");
+        const switcher = document.getElementById("platformSwitcher");
+        const title = document.getElementById("appsTitle");
+        const grid = document.getElementById("appGrid");
+        const retryButton = document.getElementById("retryButton");
+        if (pageTitle) {
+          pageTitle.textContent = `Открываем ${appName}`;
+        }
+        if (pageLead) {
+          pageLead.textContent = "Нажмите кнопку ниже. Если приложение не открылось, сразу скопируйте ссылку вручную.";
+        }
+        if (retryButton) {
+          retryButton.textContent = `ОТКРЫТЬ ${appName.toUpperCase()}`;
+        }
+        if (switcher) {
+          switcher.style.display = "none";
+        }
+        if (title) {
+          title.style.display = "none";
+        }
+        if (grid) {
+          grid.style.display = "none";
+        }
+      }
+
+      function resetSelectionMode() {
+        const pageTitle = document.getElementById("pageTitle");
+        const pageLead = document.getElementById("pageLead");
+        const switcher = document.getElementById("platformSwitcher");
+        const title = document.getElementById("appsTitle");
+        const grid = document.getElementById("appGrid");
+        const retryButton = document.getElementById("retryButton");
+        if (pageTitle) {
+          pageTitle.textContent = "Выберите свое устройство";
+        }
+        if (pageLead) {
+          pageLead.textContent = "Сначала выберите устройство, затем приложение. После этого мы попробуем открыть его автоматически.";
+        }
+        if (retryButton) {
+          retryButton.textContent = "ОТКРЫТЬ ПРИЛОЖЕНИЕ";
+        }
+        configureInstallButton(null, false);
+        if (switcher) {
+          switcher.style.display = "";
+        }
+        if (title) {
+          title.style.display = "";
+        }
+        if (grid) {
+          grid.style.display = "";
+        }
+      }
+
+      function buildSingBoxProfileUrl() {
+        const url = new URL(window.location.href);
+        const sig = url.searchParams.get("sig") || "";
+        return `${window.location.origin}/connect/${keyId}/sing-box.json?sig=${encodeURIComponent(sig)}`;
+      }
+
+      function buildLaunchUrl(app) {
+        if (!app || !connectionString) {
+          return "";
+        }
+        const encodedConnection = encodeURIComponent(connectionString);
+        switch (app.strategy) {
+          case "happ-encrypted":
+            return happLink || connectionString;
+          case "system-link":
+            return connectionString;
+          case "v2box-config":
+            return `v2box://install-config?url=${encodedConnection}`;
+          case "v2rayng-config":
+            return `v2rayng://install-config?url=${encodedConnection}`;
+          case "v2raytun-import":
+            return `v2raytun://import/${encodedConnection}`;
+          case "singbox-remote":
+            return `sing-box://import-remote-profile?url=${encodeURIComponent(buildSingBoxProfileUrl())}#24darkvpn`;
+          case "system-trojan":
+          default:
+            return connectionString;
+        }
+      }
+
+      async function copyConfig(silent = false) {
+        if (!connectionString) {
+          if (!silent) {
+            setStatus("Не удалось получить ссылку подключения. Откройте кнопку из Telegram еще раз.", "warn");
+          }
+          return false;
+        }
+        showManual();
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(connectionString);
+          } else {
+            const area = document.getElementById("configLink");
+            area.focus();
+            area.select();
+            area.setSelectionRange(0, area.value.length);
+            document.execCommand("copy");
+          }
+          if (!silent) {
+            setStatus("Ссылка скопирована. Теперь ее можно вставить вручную в приложение, если автоматическое открытие не сработало.", "ok");
+          }
+          return true;
+        } catch (error) {
+          if (!silent) {
+            setStatus("Браузер не дал скопировать ссылку автоматически. Она уже показана ниже и готова для ручного копирования.", "warn");
+          }
+          return false;
+        }
+      }
+
+      function renderApps() {
+        const grid = document.getElementById("appGrid");
+        const title = document.getElementById("appsTitle");
+        ["ios", "android", "windows", "macos"].forEach((platform) => {
+          const el = document.getElementById(`platform-${platform}`);
+          if (el) {
+            el.classList.toggle("active", platform === selectedPlatform);
+          }
+        });
+
+        if (!selectedPlatform) {
+          title.textContent = "Выберите приложение";
+          grid.innerHTML = '<div class="empty">Сначала выберите свое устройство.</div>';
+          return;
+        }
+
+        const platformTitles = {
+          ios: "Выберите приложение для iPhone",
+          android: "Выберите приложение для Android",
+          windows: "Выберите приложение для Windows",
+          macos: "Выберите приложение для Mac",
+        };
+        title.textContent = platformTitles[selectedPlatform] || "Выберите приложение";
+        grid.innerHTML = currentApps().map((app) => {
+          const activeClass = app.id === selectedAppId ? ' active' : '';
+          const disabled = !isActive ? ' disabled' : '';
+          return `
+            <button class="app-button${activeClass}" type="button" onclick="launchApp('${app.id}')"${disabled}>
+              <div class="app-head">
+                <div class="app-mark">${app.mark}</div>
+                <div class="app-copy">
+                  <strong>${app.name}</strong>
+                  <span>${app.help}</span>
+                </div>
+              </div>
+              <span class="badge ${app.tone}">${app.badge}</span>
+            </button>
+          `;
+        }).join("");
+      }
+
+      function choosePlatform(platform) {
+        resetSelectionMode();
+        selectedPlatform = platform;
+        const apps = currentApps();
+        if (!apps.length) {
+          selectedAppId = "";
+          renderApps();
+          return;
+        }
+        if (!apps.some((item) => item.id === selectedAppId)) {
+          selectedAppId = apps[0].id;
+        }
+        renderApps();
+        configureInstallButton(currentApp(), false);
+        setStatus("Теперь выберите приложение для этого устройства.", "ok");
+      }
+
+      function clearStatusTimer() {
+        if (statusTimer) {
+          clearTimeout(statusTimer);
+          statusTimer = null;
+        }
+        if (storeTimer) {
+          clearTimeout(storeTimer);
+          storeTimer = null;
+        }
+      }
+
+      function launchApp(appId, options = {}) {
+        const { auto = false } = options;
+        if (!isActive) {
+          setStatus("Срок действия ключа закончился. Получите новый доступ в Telegram.", "danger");
+          showManual();
+          return;
+        }
+        const app = currentApps().find((item) => item.id === appId);
+        if (!app) {
+          setStatus("Сначала выберите устройство, затем приложение.", "warn");
+          return;
+        }
+        setAutoRedirectMode(app.name);
+        selectedAppId = appId;
+        renderApps();
+        clearStatusTimer();
+        configureInstallButton(app, false);
+        didLeavePageSinceLaunch = false;
+        const launchUrl = buildLaunchUrl(app);
+        if (!launchUrl) {
+          setStatus("Не удалось подготовить запуск. Ссылка уже показана ниже для ручной вставки.", "warn");
+          showManual();
+          configureInstallButton(app, true);
+          return;
+        }
+        setStatus(
+          auto
+            ? `Пробуем открыть ${app.name}. Если за 4 секунды приложение не запустится, автоматически откроем магазин.`
+            : `Открываем ${app.name}. Если за 4 секунды приложение не запустится, автоматически откроем магазин.`,
+          "ok"
+        );
+        triggerLaunchUrl(launchUrl);
+        storeTimer = setTimeout(() => {
+          if (didLeavePageSinceLaunch || document.visibilityState === "hidden") {
+            return;
+          }
+          setStatus(`${app.name} не открылось. Переводим в магазин приложения.`, "warn");
+          configureInstallButton(app, true);
+          showManual();
+          window.location.href = app.storeUrl;
+        }, 4000);
+      }
+
+      function openSelectedApp() {
+        if (!selectedPlatform) {
+          setStatus("Сначала выберите свое устройство.", "warn");
+          return;
+        }
+        if (!selectedAppId) {
+          setStatus("Теперь просто нажмите на свое приложение из списка выше.", "warn");
+          return;
+        }
+        launchApp(selectedAppId);
+      }
+
+      window.addEventListener("DOMContentLoaded", () => {
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "hidden") {
+            markPageHidden();
+          }
+        });
+        window.addEventListener("pagehide", markPageHidden);
+        window.addEventListener("blur", markPageHidden);
+
+        const ua = navigator.userAgent.toLowerCase();
+        const detectedPlatform = initialPlatform || (
+          ua.includes("iphone") || ua.includes("ipad")
+            ? "ios"
+            : ua.includes("android")
+              ? "android"
+              : ua.includes("windows")
+                ? "windows"
+                : ua.includes("macintosh") || ua.includes("mac os x")
+                  ? "macos"
+                  : "ios"
+        );
+        choosePlatform(detectedPlatform);
+        if (initialApp && currentApps().some((item) => item.id === initialApp)) {
+          selectedAppId = initialApp;
+          const app = currentApps().find((item) => item.id === initialApp);
+          if (app) {
+            setAutoRedirectMode(app.name);
+            configureInstallButton(app, false);
+            setStatus(`Пробуем открыть ${app.name} автоматически. Если не получится, через 4 секунды откроем магазин.`, "ok");
+          }
+          renderApps();
+          setTimeout(() => {
+            launchApp(initialApp, { auto: true });
+          }, 180);
+        }
+      });
+    </script>
+  {% endif %}
+</body>
+</html>

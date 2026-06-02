@@ -49,7 +49,7 @@ from shop_bot.data_manager.database import (
 )
 from shop_bot.data_manager import backup_manager
 from shop_bot.bot.handlers import show_main_menu
-from shop_bot.modules.xui_api import create_or_update_key_on_host, delete_client_on_host
+from shop_bot.modules.xui_api import create_or_update_key_on_host, delete_client_on_host, build_connect_page_url_for_key
 
 logger = logging.getLogger(__name__)
 
@@ -2091,10 +2091,11 @@ def get_admin_router() -> Router:
 
         client_uuid = host_resp["client_uuid"]
         expiry_ms = int(host_resp["expiry_timestamp_ms"])  # в мс
-        connection_link = host_resp.get("connection_string")
 
         key_id = add_new_key(user_id, host_name, client_uuid, generated_email, expiry_ms)
         if key_id:
+            key_row = get_key_by_id(int(key_id))
+            open_url = build_connect_page_url_for_key(key_row) or host_resp.get("connection_string")
             username_readable = (user.get('username') or '').strip()
             user_part = f"{user_id} (@{username_readable})" if username_readable else f"{user_id}"
             text_admin = (
@@ -2108,10 +2109,16 @@ def get_admin_router() -> Router:
                     f"Сервер: {host_name}\n"
                     f"Срок: {days} дн.\n"
                 )
-                if connection_link:
-                    cs = html_escape.escape(connection_link)
-                    notify_text += f"\n🔗 Подписка:\n<pre><code>{cs}</code></pre>"
-                await message.bot.send_message(user_id, notify_text, parse_mode='HTML', disable_web_page_preview=True)
+                await message.bot.send_message(
+                    user_id,
+                    notify_text,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True,
+                    reply_markup=(
+                        keyboards.create_key_info_keyboard(int(key_id), open_url)
+                        if open_url else None
+                    )
+                )
             except Exception:
                 pass
         else:

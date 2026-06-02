@@ -1,6 +1,7 @@
 import logging
 import hashlib
 import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from datetime import datetime
 from typing import Callable
@@ -11,6 +12,80 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from shop_bot.data_manager.database import get_setting, normalize_host_name
 
 logger = logging.getLogger(__name__)
+
+
+def _append_connect_url_params(url: str, **params: str) -> str:
+    parsed = urlsplit(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    for key, value in params.items():
+        if value:
+            query[key] = value
+    return urlunsplit(parsed._replace(query=urlencode(query)))
+
+
+def _is_connect_page_url(url: str | None) -> bool:
+    return bool(url and url.startswith("http") and "/connect/" in url)
+
+
+def _add_quick_app_buttons(builder: InlineKeyboardBuilder, connect_url: str) -> None:
+    if not _is_connect_page_url(connect_url):
+        return
+
+    quick_rows = [
+        (
+            ("🍏 Happ", _append_connect_url_params(connect_url, platform="ios", app="happ")),
+            ("🤖 Happ", _append_connect_url_params(connect_url, platform="android", app="happ")),
+        ),
+        (
+            ("🍏 V2RayTun", _append_connect_url_params(connect_url, platform="ios", app="v2raytun")),
+            ("🤖 V2RayTun", _append_connect_url_params(connect_url, platform="android", app="v2raytun")),
+        ),
+    ]
+
+    for row in quick_rows:
+        builder.row(*[
+            InlineKeyboardButton(text=text, url=url)
+            for text, url in row
+        ])
+
+
+def _device_choice_buttons(key_id: int) -> list[InlineKeyboardButton]:
+    return [
+        InlineKeyboardButton(text="🍏 iPhone", callback_data=f"select_device:{key_id}:ios"),
+        InlineKeyboardButton(text="🤖 Android", callback_data=f"select_device:{key_id}:android"),
+        InlineKeyboardButton(text="🪟 Windows", callback_data=f"select_device:{key_id}:windows"),
+        InlineKeyboardButton(text="💻 Mac", callback_data=f"select_device:{key_id}:macos"),
+    ]
+
+
+def create_platform_apps_keyboard(key_id: int, platform: str, connect_url: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    if _is_connect_page_url(connect_url):
+        apps_by_platform = {
+            "ios": [
+                ("💙 Happ", _append_connect_url_params(connect_url, platform="ios", app="happ")),
+                ("🚀 V2RayTun", _append_connect_url_params(connect_url, platform="ios", app="v2raytun")),
+            ],
+            "android": [
+                ("💙 Happ", _append_connect_url_params(connect_url, platform="android", app="happ")),
+                ("🚀 V2RayTun", _append_connect_url_params(connect_url, platform="android", app="v2raytun")),
+            ],
+            "windows": [
+                ("💙 Happ", _append_connect_url_params(connect_url, platform="windows", app="happ")),
+                ("⚡ v2rayN", _append_connect_url_params(connect_url, platform="windows", app="v2rayn")),
+            ],
+            "macos": [
+                ("💙 Happ", _append_connect_url_params(connect_url, platform="macos", app="happ")),
+                ("🚀 V2RayTun", _append_connect_url_params(connect_url, platform="macos", app="v2raytun")),
+            ],
+        }
+        for text, url in apps_by_platform.get(platform, []):
+            builder.button(text=text, url=url)
+
+    builder.button(text="⬅️ Назад", callback_data=f"show_key_{key_id}")
+    builder.adjust(2, 1)
+    return builder.as_markup()
 
 main_reply_keyboard = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="🏠 Главное меню")]],
@@ -173,8 +248,10 @@ def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: 
         button_id = (cfg.get('button_id') or '').strip()
         # Filter trial button
         if button_id == 'btn_try':
-            if not trial_available or get_setting("trial_enabled") != "true":
-                return False
+            return False
+        # Payments/top-up are disabled
+        if button_id == 'btn_top_up':
+            return False
         # Filter admin button
         if button_id == 'btn_admin' and not is_admin:
             return False
@@ -314,14 +391,10 @@ def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: 
     
     # Fallback to original hardcoded logic
     logger.info("Using fallback hardcoded button logic")
-    if trial_available and get_setting("trial_enabled") == "true":
-        builder.button(text=(get_setting("btn_try") or "🎁 Попробовать бесплатно"), callback_data="get_trial")
-
     builder.button(text=(get_setting("btn_profile") or "👤 Мой профиль"), callback_data="show_profile")
     keys_label_tpl = (get_setting("btn_my_keys") or "🔑 Мои ключи ({count})")
     builder.button(text=keys_label_tpl.replace("{count}", str(len(user_keys))), callback_data="manage_keys")
-    builder.button(text=(get_setting("btn_buy_key") or "💳 Купить ключ"), callback_data="buy_new_key")
-    builder.button(text=(get_setting("btn_top_up") or "➕ Пополнить баланс"), callback_data="top_up_start")
+    builder.button(text=(get_setting("btn_buy_key") or "🚀 Получить VPN"), callback_data="buy_new_key")
     builder.button(text=(get_setting("btn_referral") or "🤝 Реферальная программа"), callback_data="show_referral_program")
     builder.button(text=(get_setting("btn_support") or "🆘 Поддержка"), callback_data="show_help")
     builder.button(text=(get_setting("btn_about") or "ℹ️ О проекте"), callback_data="show_about")
@@ -331,9 +404,8 @@ def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: 
         builder.button(text=(get_setting("btn_admin") or "⚙️ Админка"), callback_data="admin_menu")
 
     layout = [
-        1 if trial_available and get_setting("trial_enabled") == "true" else 0,  # триал
         2,  # профиль + мои ключи
-        2,  # купить ключ + пополнить баланс
+        1,  # получить VPN
         1,  # рефералка
         2,  # поддержка + о проекте
         2,  # как использовать + тест скорости
@@ -844,18 +916,27 @@ def create_keys_management_keyboard(keys: list) -> InlineKeyboardMarkup:
             host_name = key.get('host_name', 'Неизвестный хост')
             button_text = f"{status_icon} Ключ #{i+1} ({host_name}) (до {expiry_date.strftime('%d.%m.%Y')})"
             builder.button(text=button_text, callback_data=f"show_key_{key['key_id']}")
-    builder.button(text=(get_setting("btn_buy_key") or "➕ Купить новый ключ"), callback_data="buy_new_key")
+    builder.button(text=(get_setting("btn_buy_key") or "🚀 Получить VPN"), callback_data="buy_new_key")
     builder.button(text=(get_setting("btn_back_to_menu") or "⬅️ Назад в меню"), callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
-def create_key_info_keyboard(key_id: int) -> InlineKeyboardMarkup:
+def create_key_info_keyboard(key_id: int, open_url: str | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=(get_setting("btn_extend_key") or "➕ Продлить этот ключ"), callback_data=f"extend_key_{key_id}")
-    builder.button(text=(get_setting("btn_show_qr") or "📱 Показать QR-код"), callback_data=f"show_qr_{key_id}")
-    builder.button(text=(get_setting("btn_instruction") or "📖 Инструкция"), callback_data=f"howto_vless_{key_id}")
-    builder.button(text=(get_setting("btn_switch_server") or "🌍 Сменить сервер"), callback_data=f"switch_server_{key_id}")
-    builder.button(text=(get_setting("btn_back_to_keys") or "⬅️ Назад к списку ключей"), callback_data="manage_keys")
+    if open_url and _is_connect_page_url(open_url):
+        device_buttons = _device_choice_buttons(key_id)
+        builder.row(*device_buttons[:2])
+        builder.row(*device_buttons[2:])
+    builder.row(InlineKeyboardButton(
+        text=(get_setting("btn_back_to_keys") or "⬅️ Назад к списку ключей"),
+        callback_data="manage_keys",
+    ))
+    return builder.as_markup()
+
+def create_copy_subscription_keyboard(open_url: str, back_callback: str = "back_to_main_menu") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    _add_quick_app_buttons(builder, open_url)
+    builder.button(text=(get_setting("btn_back_to_menu") or "⬅️ Назад в меню"), callback_data=back_callback)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -871,10 +952,10 @@ def create_howto_vless_keyboard() -> InlineKeyboardMarkup:
 
 def create_howto_vless_keyboard_key(key_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=(get_setting("btn_howto_android") or "📱 Android"), callback_data="howto_android")
-    builder.button(text=(get_setting("btn_howto_ios") or "📱 iOS"), callback_data="howto_ios")
-    builder.button(text=(get_setting("btn_howto_windows") or "💻 Windows"), callback_data="howto_windows")
-    builder.button(text=(get_setting("btn_howto_linux") or "🐧 Linux"), callback_data="howto_linux")
+    builder.button(text=(get_setting("btn_howto_android") or "📱 Android"), callback_data=f"howto_android_{key_id}")
+    builder.button(text=(get_setting("btn_howto_ios") or "📱 iOS"), callback_data=f"howto_ios_{key_id}")
+    builder.button(text=(get_setting("btn_howto_windows") or "💻 Windows"), callback_data=f"howto_windows_{key_id}")
+    builder.button(text=(get_setting("btn_howto_linux") or "🐧 Linux"), callback_data=f"howto_linux_{key_id}")
     builder.button(text=(get_setting("btn_back_to_key") or "⬅️ Назад к ключу"), callback_data=f"show_key_{key_id}")
     builder.adjust(2, 2, 1)
     return builder.as_markup()
@@ -885,12 +966,15 @@ def create_back_to_menu_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 def create_profile_keyboard() -> InlineKeyboardMarkup:
-    kb = _build_keyboard_from_db('profile_menu')
+    def _filter(cfg: dict) -> bool:
+        cd = (cfg.get('callback_data') or '').strip()
+        return cd != 'top_up_start'
+
+    kb = _build_keyboard_from_db('profile_menu', filter_func=_filter)
     if kb:
         return kb
 
     builder = InlineKeyboardBuilder()
-    builder.button(text=(get_setting("btn_top_up") or "➕ Пополнить баланс"), callback_data="top_up_start")
     builder.button(text=(get_setting("btn_referral") or "🤝 Реферальная программа"), callback_data="show_referral_program")
     builder.button(text=(get_setting("btn_back_to_menu") or "⬅️ Назад в меню"), callback_data="back_to_main_menu")
     builder.adjust(1)

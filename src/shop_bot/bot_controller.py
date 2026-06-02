@@ -116,13 +116,14 @@ class BotController:
                 Configuration.account_id = yookassa_shop_id
                 Configuration.secret_key = yookassa_secret_key
             
+            # В проекте оплата отключена: принудительно выключаем все платежные методы
             handlers.PAYMENT_METHODS = {
-                "yookassa": yookassa_enabled,
-                "heleket": heleket_enabled,
-                "cryptobot": cryptobot_enabled,
-                "tonconnect": tonconnect_enabled,
-                "stars": stars_enabled,
-                "yoomoney": yoomoney_enabled,
+                "yookassa": False,
+                "heleket": False,
+                "cryptobot": False,
+                "tonconnect": False,
+                "stars": False,
+                "yoomoney": False,
             }
             handlers.TELEGRAM_BOT_USERNAME = bot_username
             handlers.ADMIN_ID = admin_id

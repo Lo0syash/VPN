@@ -86,6 +86,194 @@ ALL_SETTINGS_KEYS = [
     "yoomoney_client_id", "yoomoney_client_secret", "yoomoney_redirect_uri",
 ]
 
+CONNECT_APP_IDS = {
+    "v2box",
+    "v2rayng",
+    "v2rayn",
+    "singbox",
+    "v2raytun",
+    "shadowrocket",
+    "streisand",
+    "npv-tunnel",
+    "happ",
+}
+
+_HAPP_CRYPTO_CACHE_TTL_SEC = 6 * 60 * 60
+_happ_crypto_cache: dict[str, tuple[float, str]] = {}
+
+
+def _build_happ_encrypted_link(subscription_url: str | None) -> str | None:
+    normalized = (subscription_url or "").strip()
+    if not normalized:
+        return None
+
+    cached = _happ_crypto_cache.get(normalized)
+    now_ts = time.time()
+    if cached and (now_ts - cached[0]) < _HAPP_CRYPTO_CACHE_TTL_SEC:
+        return cached[1]
+
+    payload = json.dumps({"url": normalized}).encode("utf-8")
+    req = urllib.request.Request(
+        "https://crypto.happ.su/api-v2.php",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+        data = json.loads(raw)
+        encrypted_link = (data.get("encrypted_link") or "").strip()
+        if not encrypted_link:
+            raise ValueError("empty encrypted_link in Happ API response")
+        _happ_crypto_cache[normalized] = (now_ts, encrypted_link)
+        return encrypted_link
+    except Exception as exc:
+        logger.warning("Не удалось подготовить Happ deeplink для %s: %s", normalized, exc)
+        return None
+
+
+def _build_android_intent_url(app_url: str | None, package_name: str, fallback_url: str) -> str | None:
+    raw = (app_url or "").strip()
+    if not raw:
+        return None
+
+    parsed = urllib.parse.urlparse(raw)
+    scheme = (parsed.scheme or "").strip()
+    if not scheme:
+        return None
+
+    host_and_path = f"{parsed.netloc}{parsed.path or ''}"
+    if not host_and_path:
+        return None
+
+    if parsed.query:
+        host_and_path = f"{host_and_path}?{parsed.query}"
+
+    fallback = urllib.parse.quote(fallback_url, safe="")
+    return (
+        f"intent://{host_and_path}"
+        f"#Intent;scheme={scheme};package={package_name};"
+        f"S.browser_fallback_url={fallback};end"
+    )
+
+
+def _build_mobile_launch_url(
+    platform: str,
+    app_choice: str,
+    connection_string: str | None,
+    happ_link: str | None,
+) -> str | None:
+    platform_name = (platform or "").strip().lower()
+    app_name = (app_choice or "").strip().lower()
+    connection = (connection_string or "").strip()
+    encrypted_happ = (happ_link or "").strip()
+
+    if app_name == "v2raytun" and connection:
+        deep_link = f"v2raytun://import/{urllib.parse.quote(connection, safe='')}"
+        if platform_name == "android":
+            return _build_android_intent_url(
+                deep_link,
+                package_name="com.v2raytun.android",
+                fallback_url="https://play.google.com/store/apps/details?id=com.v2raytun.android",
+            )
+        return deep_link
+
+    if app_name == "happ":
+        deep_link = encrypted_happ or connection
+        if not deep_link:
+            return None
+        if platform_name == "android":
+            return _build_android_intent_url(
+                deep_link,
+                package_name="com.happproxy",
+                fallback_url="https://play.google.com/store/apps/details?id=com.happproxy",
+            )
+        return deep_link
+
+    return None
+
+
+def _build_singbox_remote_profile(connection_string: str) -> dict | None:
+    link = (connection_string or "").strip()
+    if not link:
+        return None
+
+    parsed = urllib.parse.urlparse(link)
+    if (parsed.scheme or "").lower() != "trojan":
+        return None
+
+    password = urllib.parse.unquote(parsed.username or "")
+    server = (parsed.hostname or "").strip()
+    server_port = parsed.port or 443
+    if not password or not server:
+        return None
+
+    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    sni = (query.get("sni", [server])[0] or server).strip()
+    fingerprint = (query.get("fp", ["chrome"])[0] or "chrome").strip()
+    alpn_raw = urllib.parse.unquote(query.get("alpn", [""])[0] or "")
+    alpn = [item.strip() for item in alpn_raw.split(",") if item.strip()]
+
+    tls_config = {
+        "enabled": True,
+        "server_name": sni,
+    }
+    if alpn:
+        tls_config["alpn"] = alpn
+    if fingerprint:
+        tls_config["utls"] = {
+            "enabled": True,
+            "fingerprint": fingerprint,
+        }
+
+    return {
+        "log": {
+            "disabled": True,
+        },
+        "inbounds": [
+            {
+                "type": "tun",
+                "interface_name": "tun0",
+                "address": ["172.19.0.1/30", "fd00::1/126"],
+                "mtu": 9000,
+                "auto_route": True,
+                "strict_route": True,
+                "endpoint_independent_nat": True,
+                "sniff": True,
+                "stack": "system",
+            }
+        ],
+        "outbounds": [
+            {
+                "type": "selector",
+                "tag": "select",
+                "outbounds": ["proxy", "direct"],
+                "default": "proxy",
+            },
+            {
+                "type": "trojan",
+                "tag": "proxy",
+                "server": server,
+                "server_port": server_port,
+                "password": password,
+                "tls": tls_config,
+            },
+            {
+                "type": "direct",
+                "tag": "direct",
+            },
+            {
+                "type": "block",
+                "tag": "block",
+            },
+        ],
+        "route": {
+            "auto_detect_interface": True,
+            "final": "select",
+        },
+    }
+
 def create_webhook_app(bot_controller_instance):
     global _bot_controller
     _bot_controller = bot_controller_instance
@@ -156,6 +344,145 @@ def create_webhook_app(bot_controller_instance):
         session.pop('logged_in', None)
         flash('Вы успешно вышли.', 'success')
         return redirect(url_for('login_page'))
+
+    def _build_connect_error_response(title: str, text: str, status_code: int):
+        response = current_app.make_response(render_template(
+            'connect.html',
+            error_title=title,
+            error_text=text,
+        ))
+        response.headers['Cache-Control'] = 'no-store, max-age=0'
+        return response, status_code
+
+    def _resolve_public_connect_context(key_id: int, sig: str):
+        key_data = get_key_by_id(key_id)
+        if not key_data:
+            return None, ('Ссылка не найдена', 'Этот экран подключения больше не существует. Откройте кнопку из Telegram заново.', 404)
+
+        expected_sig = xui_api.get_connect_signature(
+            int(key_data.get('key_id') or 0),
+            str(key_data.get('xui_client_uuid') or '').strip(),
+            str(key_data.get('key_email') or '').strip(),
+            key_data.get('host_name'),
+        )
+        if not sig or not compare_digest(sig, expected_sig):
+            return None, ('Ссылка недействительна', 'Откройте экран подключения только через кнопку в Telegram, чтобы получить актуальный ключ.', 403)
+
+        try:
+            details = asyncio.run(xui_api.get_key_details_from_host(key_data))
+        except Exception as e:
+            logger.error(f"Не удалось получить данные подключения для key_id={key_id}: {e}", exc_info=True)
+            details = None
+
+        if not details or not details.get('connection_string'):
+            return None, ('Подключение недоступно', 'Не удалось получить актуальную ссылку с сервера. Попробуйте открыть кнопку из Telegram еще раз чуть позже.', 502)
+
+        expiry_raw = key_data.get('expiry_date')
+        expiry_dt = None
+        if expiry_raw:
+            if isinstance(expiry_raw, str):
+                try:
+                    expiry_dt = datetime.fromisoformat(expiry_raw)
+                except Exception:
+                    try:
+                        expiry_dt = datetime.strptime(expiry_raw, '%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        expiry_dt = None
+            else:
+                expiry_dt = expiry_raw
+
+        now = datetime.now()
+        is_active = bool(not expiry_dt or expiry_dt > now)
+        display_name = (details.get('display_name') or key_data.get('host_name') or 'VPN').strip()
+        return {
+            'key_id': key_id,
+            'platform': '',
+            'display_name': display_name,
+            'host_name': key_data.get('host_name') or 'VPN',
+            'expiry_date': expiry_dt,
+            'is_active': is_active,
+            'connection_string': details.get('connection_string'),
+            'subscription_string': details.get('subscription_string'),
+            'happ_link': _build_happ_encrypted_link(details.get('subscription_string')),
+        }, None
+
+    @flask_app.route('/connect/<int:key_id>')
+    def public_connect_page(key_id: int):
+        sig = (request.args.get('sig') or '').strip()
+        platform = (request.args.get('platform') or '').strip().lower()
+        app_choice = (request.args.get('app') or '').strip().lower()
+        if platform not in {"ios", "android", "windows", "macos"}:
+            platform = ""
+        if app_choice not in CONNECT_APP_IDS:
+            app_choice = ""
+
+        context, error = _resolve_public_connect_context(key_id, sig)
+        if error:
+            return _build_connect_error_response(*error)
+
+        android_launch_url = None
+        if (
+            platform == "android"
+            and app_choice in {"happ", "v2raytun"}
+            and context.get("is_active")
+        ):
+            android_launch_url = _build_mobile_launch_url(
+                platform=platform,
+                app_choice=app_choice,
+                connection_string=context.get("connection_string"),
+                happ_link=context.get("happ_link"),
+            )
+        if android_launch_url:
+            response = redirect(android_launch_url, code=302)
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+            return response
+
+        response = current_app.make_response(render_template(
+            'connect.html',
+            key_id=context['key_id'],
+            platform=platform,
+            app=app_choice,
+            display_name=context['display_name'],
+            host_name=context['host_name'],
+            expiry_date=context['expiry_date'],
+            is_active=context['is_active'],
+            connection_string=context['connection_string'],
+            subscription_string=context['subscription_string'],
+            happ_link=context['happ_link'],
+        ))
+        response.headers['Cache-Control'] = 'no-store, max-age=0'
+        return response
+
+    @flask_app.route('/connect/<int:key_id>/sing-box.json')
+    def public_connect_singbox_profile(key_id: int):
+        sig = (request.args.get('sig') or '').strip()
+        context, error = _resolve_public_connect_context(key_id, sig)
+        if error:
+            title, text, status_code = error
+            response = current_app.make_response(jsonify({
+                'ok': False,
+                'error': title,
+                'message': text,
+            }))
+            response.headers['Cache-Control'] = 'no-store, max-age=0'
+            return response, status_code
+
+        profile = _build_singbox_remote_profile(context.get('connection_string') or '')
+        if not profile:
+            response = current_app.make_response(jsonify({
+                'ok': False,
+                'error': 'invalid-connection',
+                'message': 'Не удалось подготовить конфигурацию sing-box для этого ключа.',
+            }))
+            response.headers['Cache-Control'] = 'no-store, max-age=0'
+            return response, 422
+
+        profile_json = json.dumps(profile, ensure_ascii=False, indent=2)
+        response = current_app.make_response(profile_json)
+        response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        response.headers['Cache-Control'] = 'no-store, max-age=0'
+        response.headers['Content-Disposition'] = f'inline; filename="24darkvpn-{key_id}-sing-box.json"'
+        return response
 
     def get_common_template_data():
         bot_status = _bot_controller.get_status()
@@ -2068,5 +2395,3 @@ def create_webhook_app(bot_controller_instance):
             return 'Error', 500
 
     return flask_app
-
-

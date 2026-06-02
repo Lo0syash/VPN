@@ -194,7 +194,7 @@ def initialize_db():
                 "btn_try": "🎁 Попробовать бесплатно",
                 "btn_profile": "👤 Мой профиль",
                 "btn_my_keys": "🔑 Мои ключи ({count})",
-                "btn_buy_key": "💳 Купить ключ",
+                "btn_buy_key": "🚀 Получить VPN",
                 "btn_top_up": "➕ Пополнить баланс",
                 "btn_referral": "🤝 Реферальная программа",
                 "btn_support": "🆘 Поддержка",
@@ -234,7 +234,7 @@ def initialize_db():
                 "receipt_email": "example@example.com",
                 "telegram_bot_token": None,
                 "telegram_bot_username": None,
-                "trial_enabled": "true",
+                "trial_enabled": "false",
                 "trial_duration_days": "3",
                 "enable_referrals": "true",
                 "referral_percentage": "10",
@@ -635,6 +635,12 @@ def run_migration():
             logging.info(" -> Столбец 'referral_start_bonus_received' успешно добавлен.")
         else:
             logging.info(" -> Столбец 'referral_start_bonus_received' уже существует.")
+
+        if 'last_vpn_issued_at' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN last_vpn_issued_at TIMESTAMP")
+            logging.info(" -> Столбец 'last_vpn_issued_at' успешно добавлен.")
+        else:
+            logging.info(" -> Столбец 'last_vpn_issued_at' уже существует.")
         
         logging.info("Таблица 'users' успешно обновлена.")
 
@@ -898,6 +904,25 @@ def run_migration():
             conn.commit()
         except sqlite3.Error as e:
             logging.error(f"Не удалось подготовить таблицы промокодов: {e}")
+
+        # Принудительно переводим интерфейс в режим без оплаты:
+        # 1) основная кнопка покупки -> "Получить VPN"
+        # 2) trial и пополнение скрываются
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE bot_settings SET value = ? WHERE key = 'btn_buy_key'",
+                ("🚀 Получить VPN",)
+            )
+            cursor.execute("UPDATE bot_settings SET value = 'false' WHERE key = 'trial_enabled'")
+            cursor.execute(
+                "UPDATE button_configs SET text = ?, callback_data = ? WHERE button_id = 'btn_buy_key'",
+                ("🚀 Получить VPN", "buy_new_key")
+            )
+            cursor.execute("UPDATE button_configs SET is_active = 0 WHERE button_id IN ('btn_top_up', 'btn_try')")
+            conn.commit()
+        except sqlite3.Error as e:
+            logging.warning(f"Не удалось обновить кнопки в режим без оплаты: {e}")
 
         conn.close()
         
@@ -1830,6 +1855,19 @@ def set_terms_agreed(telegram_id: int):
     except sqlite3.Error as e:
         logging.error(f"Не удалось set terms agreed for user {telegram_id}: {e}")
 
+def set_last_vpn_issued_at(telegram_id: int, issued_at: datetime | None = None):
+    issued_at = issued_at or datetime.now()
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET last_vpn_issued_at = ? WHERE telegram_id = ?",
+                (issued_at.isoformat(), telegram_id)
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось сохранить last_vpn_issued_at для пользователя {telegram_id}: {e}")
+
 def update_user_stats(telegram_id: int, amount_spent: float, months_purchased: int):
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -2718,7 +2756,7 @@ def migrate_existing_buttons() -> bool:
                     
                     # Row 2: Two buttons
                     {'button_id': 'btn_my_keys', 'callback_data': 'manage_keys', 'text': '🔑 Мои ключи ({count})', 'row_position': 2, 'column_position': 0, 'button_width': 1},
-                    {'button_id': 'btn_buy_key', 'callback_data': 'buy_new_key', 'text': '💳 Купить ключ', 'row_position': 2, 'column_position': 1, 'button_width': 1},
+                    {'button_id': 'btn_buy_key', 'callback_data': 'buy_new_key', 'text': '🚀 Получить VPN', 'row_position': 2, 'column_position': 1, 'button_width': 1},
                     
                     # Row 3: Two buttons
                     {'button_id': 'btn_top_up', 'callback_data': 'top_up_start', 'text': '➕ Пополнить баланс', 'row_position': 3, 'column_position': 0, 'button_width': 1},

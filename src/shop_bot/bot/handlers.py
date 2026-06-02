@@ -103,63 +103,119 @@ def is_valid_email(email: str) -> bool:
     pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
     return re.match(pattern, email) is not None
 
-async def show_main_menu(message: types.Message, edit_message: bool = False):
+async def issue_24h_vpn_access(message: types.Message, host_name: str | None = None):
+    """Выдаёт бесплатный VPN доступ на 24 часа. Может быть активирован раз в 24 часа."""
     user_id = message.chat.id
-    user_db_data = get_user(user_id)
-    user_keys = get_user_keys(user_id)
-    
-    trial_available = not (user_db_data and user_db_data.get('trial_used'))
-    is_admin_flag = is_admin(user_id)
+    user_data = get_user(user_id) or {}
+    now = datetime.now()
 
-    custom_main_text = get_setting("main_menu_text")
-    text = (custom_main_text or "🏠 <b>Главное меню</b>\n\nВыберите действие:")
-    keyboard = keyboards.create_main_menu_keyboard(user_keys, trial_available, is_admin_flag)
-    # Отправляем только текст без фотографии
-    if edit_message:
+    # Проверка лимита 24 часа
+    last_issued_str = user_data.get("last_vpn_issued_at")
+    if last_issued_str:
         try:
-            await message.edit_text(text, reply_markup=keyboard)
-        except TelegramBadRequest:
-            pass
-    else:
-        await message.answer(text, reply_markup=keyboard)
-
-async def process_successful_onboarding(callback: types.CallbackQuery, state: FSMContext):
-    """Завершает онбординг: ставит флаг согласия и открывает главное меню."""
-    user_id = callback.from_user.id
-    try:
-        set_terms_agreed(user_id)
-    except Exception as e:
-        logger.error(f"Не удалось установить согласие с условиями для пользователя {user_id}: {e}")
-    try:
-        await callback.answer()
-    except Exception:
-        pass
-    try:
-        await show_main_menu(callback.message, edit_message=True)
-    except Exception:
-        try:
-            await callback.message.answer("✅ Требования выполнены. Открываю меню...")
+            last_issued_at = datetime.fromisoformat(last_issued_str)
+            next_allowed_at = last_issued_at + timedelta(hours=24)
+            if next_allowed_at > now:
+                remaining = next_allowed_at - now
+                hours = int(remaining.total_seconds() // 3600)
+                minutes = int((remaining.total_seconds() % 3600) // 60)
+                time_str = f"{hours} ч. {minutes} мин." if hours > 0 else f"{minutes} мин."
+                await message.edit_text(
+                    f"⏳ Вы уже активировали VPN.\n\nПовторная активация будет доступна через {time_str}.",
+                    reply_markup=keyboards.create_back_to_menu_keyboard()
+                )
+                return
         except Exception:
             pass
-    try:
-        await state.clear()
-    except Exception:
-        pass
 
-def registration_required(f):
-    @wraps(f)
-    async def decorated_function(event: types.Update, *args, **kwargs):
-        user_id = event.from_user.id
-        user_data = get_user(user_id)
-        if user_data:
-            return await f(event, *args, **kwargs)
-        else:
-            message_text = "Пожалуйста, для начала работы со мной, отправьте команду /start"
-            if isinstance(event, types.CallbackQuery):
-                await event.answer(message_text, show_alert=True)
+    hosts = get_all_hosts()
+    if not hosts:
+        await message.edit_text("❌ Сейчас нет доступных серверов для выдачи VPN.")
+        return
+
+    selected_host = host_name or hosts[0].get('host_name')
+    if not selected_host:
+        await message.edit_text("❌ Не удалось определить сервер для выдачи VPN.")
+        return
+
+    await message.edit_text(f"⏳ Активирую VPN на 24 часа на сервере «{selected_host}»...")
+
+    try:
+        key_email = f"user{user_id}-daily@bot.local"
+        expiry_timestamp_ms = int((now + timedelta(hours=24)).timestamp() * 1000)
+
+        result = await xui_api.create_or_update_key_on_host(
+            host_name=selected_host,
+            email=key_email,
+            expiry_timestamp_ms=expiry_timestamp_ms
+        )
+        if not result:
+            await message.edit_text("❌ Не удалось активировать VPN. Ошибка на сервере.")
+            return
+
+        # Проверяем, есть ли уже ключ с таким email
+        existing_key = get_key_by_email(key_email)
+        if existing_key:
+            key_id = int(existing_key['key_id'])
+            # Если сервер изменился, обновляем хост и инфо
+            if (existing_key.get('host_name') or '') != selected_host:
+                update_key_host_and_info(
+                    key_id=key_id,
+                    new_host_name=selected_host,
+                    new_xui_uuid=result['client_uuid'],
+                    new_expiry_ms=int(result['expiry_timestamp_ms'])
+                )
             else:
-                await event.answer(message_text)
-    return decorated_function
+                update_key_info(
+                    key_id=key_id,
+                    new_xui_uuid=result['client_uuid'],
+                    new_expiry_ms=int(result['expiry_timestamp_ms'])
+                )
+        else:
+            key_id = add_new_key(
+                user_id=user_id,
+                host_name=selected_host,
+                xui_client_uuid=result['client_uuid'],
+                key_email=result['email'],
+                expiry_timestamp_ms=result['expiry_timestamp_ms']
+            )
+            if not key_id:
+                await message.edit_text("❌ VPN активирован на панели, но не удалось сохранить ключ в базе.")
+                return
+
+        set_last_vpn_issued_at(user_id, now)
+        expiry_date = datetime.fromtimestamp(int(result['expiry_timestamp_ms']) / 1000)
+        final_text = (
+            "✅ <b>VPN активирован на 24 часа!</b>\n\n"
+            f"⏳ Доступ до: <b>{expiry_date.strftime('%d.%m.%Y %H:%M')}</b>\n"
+            f"🌍 Сервер: <b>{selected_host}</b>\n\n"
+            "1. Выберите свое устройство.\n"
+            "2. Затем выберите приложение."
+        )
+        key_id_int = int(key_id)
+        key_row = get_key_by_id(key_id_int)
+        open_url = xui_api.build_connect_page_url_for_key(key_row) or result['connection_string']
+        
+        try:
+            await message.edit_text(
+                text=final_text,
+                reply_markup=keyboards.create_key_info_keyboard(key_id_int, open_url),
+                disable_web_page_preview=True
+            )
+        except TelegramBadRequest:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await message.answer(
+                text=final_text,
+                reply_markup=keyboards.create_key_info_keyboard(key_id_int, open_url),
+                disable_web_page_preview=True
+            )
+
+    except Exception as e:
+        logger.error(f"Ошибка активации 24h VPN для пользователя {user_id} на хосте {selected_host}: {e}", exc_info=True)
+        await message.edit_text("❌ Произошла ошибка при активации VPN.")
 
 def get_user_router() -> Router:
     user_router = Router()
@@ -1192,26 +1248,9 @@ def get_user_router() -> Router:
     @user_router.callback_query(F.data == "get_trial")
     @registration_required
     async def trial_period_handler(callback: types.CallbackQuery, state: FSMContext):
-        user_id = callback.from_user.id
-        user_db_data = get_user(user_id)
-        if user_db_data and user_db_data.get('trial_used'):
-            await callback.answer("Вы уже использовали бесплатный пробный период.", show_alert=True)
-            return
-
-        hosts = get_all_hosts()
-        if not hosts:
-            await callback.message.edit_text("❌ В данный момент нет доступных серверов для создания пробного ключа.")
-            return
-            
-        if len(hosts) == 1:
-            await callback.answer()
-            await process_trial_key_creation(callback.message, hosts[0]['host_name'])
-        else:
-            await callback.answer()
-            await callback.message.edit_text(
-                "Выберите сервер, на котором хотите получить пробный ключ:",
-                reply_markup=keyboards.create_host_selection_keyboard(hosts, action="trial")
-            )
+        await state.clear()
+        await callback.answer()
+        await issue_24h_vpn_access(callback.message)
 
     @user_router.callback_query(F.data.startswith("select_host:"))
     @registration_required
@@ -1232,19 +1271,12 @@ def get_user_router() -> Router:
 
         if action == "trial":
             await callback.answer()
-            await process_trial_key_creation(callback.message, host_name)
+            await issue_24h_vpn_access(callback.message, host_name=host_name)
             return
 
         if action == "new":
             await callback.answer()
-            plans = get_plans_for_host(host_name)
-            if not plans:
-                await callback.message.edit_text(f"❌ Для сервера \"{host_name}\" не настроены тарифы.")
-                return
-            await callback.message.edit_text(
-                CHOOSE_PLAN_MESSAGE or "Выберите тариф:",
-                reply_markup=keyboards.create_plans_keyboard(plans, action="new", host_name=host_name)
-            )
+            await issue_24h_vpn_access(callback.message, host_name=host_name)
             return
 
         if action == "switch":
@@ -1257,65 +1289,6 @@ def get_user_router() -> Router:
             return
 
         await callback.answer("Неизвестное действие.", show_alert=True)
-
-    async def process_trial_key_creation(message: types.Message, host_name: str):
-        user_id = message.chat.id
-        await message.edit_text(f"Отлично! Создаю для вас бесплатный ключ на {get_setting('trial_duration_days')} дня на сервере \"{host_name}\"...")
-
-        try:
-            # email: trial_{username}@bot.local с авто-суффиксом при коллизиях
-            user_data = get_user(user_id) or {}
-            raw_username = (user_data.get('username') or f'user{user_id}').lower()
-            username_slug = re.sub(r"[^a-z0-9._-]", "_", raw_username).strip("_")[:16] or f"user{user_id}"
-            base_local = f"trial_{username_slug}"
-            candidate_local = base_local
-            attempt = 1
-            while True:
-                candidate_email = f"{candidate_local}@bot.local"
-                if not get_key_by_email(candidate_email):
-                    break
-                attempt += 1
-                candidate_local = f"{base_local}-{attempt}"
-                if attempt > 100:
-                    candidate_local = f"{base_local}-{int(datetime.now().timestamp())}"
-                    candidate_email = f"{candidate_local}@bot.local"
-                    break
-
-            result = await xui_api.create_or_update_key_on_host(
-                host_name=host_name,
-                email=candidate_email,
-                days_to_add=int(get_setting("trial_duration_days"))
-            )
-            if not result:
-                await message.edit_text("❌ Не удалось создать пробный ключ. Ошибка на сервере.")
-                return
-
-            set_trial_used(user_id)
-            
-            new_key_id = add_new_key(
-                user_id=user_id,
-                host_name=host_name,
-                xui_client_uuid=result['client_uuid'],
-                key_email=result['email'],
-                expiry_timestamp_ms=result['expiry_timestamp_ms']
-            )
-            
-            new_expiry_date = datetime.fromtimestamp(result['expiry_timestamp_ms'] / 1000)
-            final_text = get_purchase_success_text("готов", get_next_key_number(user_id) -1, new_expiry_date, result['connection_string'])
-            # Вместо удаления сообщения (что может быть запрещено Telegram), сначала пытаемся отредактировать его
-            try:
-                await message.edit_text(text=final_text, reply_markup=keyboards.create_key_info_keyboard(new_key_id), disable_web_page_preview=True)
-            except TelegramBadRequest:
-                # Фолбэк: если редактирование невозможно (например, старое сообщение), попробуем удалить и отправить новое
-                try:
-                    await message.delete()
-                except Exception:
-                    pass
-                await message.answer(text=final_text, reply_markup=keyboards.create_key_info_keyboard(new_key_id))
-
-        except Exception as e:
-            logger.error(f"Ошибка создания пробного ключа для пользователя {user_id} на хосте {host_name}: {e}", exc_info=True)
-            await message.edit_text("❌ Произошла ошибка при создании пробного ключа.")
 
     @user_router.callback_query(F.data.startswith("show_key_"))
     @registration_required
@@ -1712,15 +1685,7 @@ def get_user_router() -> Router:
     @registration_required
     async def buy_new_key_handler(callback: types.CallbackQuery):
         await callback.answer()
-        hosts = get_all_hosts()
-        if not hosts:
-            await callback.message.edit_text("❌ В данный момент нет доступных серверов для покупки.")
-            return
-        
-        await callback.message.edit_text(
-            "Выберите сервер, на котором хотите приобрести ключ:",
-            reply_markup=keyboards.create_host_selection_keyboard(hosts, action="new")
-        )
+        await issue_24h_vpn_access(callback.message)
 
     @user_router.callback_query(F.data.startswith("extend_key_"))
     @registration_required
